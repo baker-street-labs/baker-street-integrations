@@ -1,0 +1,242 @@
+# Phase 3: Kubernetes cert-manager Integration
+# Baker Street Labs PKI Gap Closure
+#
+# Purpose: Deploy cert-manager and integrate with step-ca
+# Prerequisites: CA chain distributed, K8s cluster operational
+# Execution: kubectl apply -f phase3-certmanager-k8s.yaml
+
+---
+# Step 1: Install cert-manager
+# Run first: kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+# Wait for pods: kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=300s
+
+---
+# Step 2: Create namespace for Baker Street PKI resources
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: baker-street-pki
+  labels:
+    name: baker-street-pki
+    purpose: certificate-management
+
+---
+# Step 3: Create ConfigMap with CA certificates
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: baker-street-ca-bundle
+  namespace: baker-street-pki
+data:
+  root-ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    # TODO: Replace with actual Root CA certificate from bakerstreeta
+    # Export from Windows: certutil -ca.cert C:\temp\root-ca.cer
+    # Convert to PEM: certutil -encode root-ca.cer root-ca.pem
+    # Copy content here
+    -----END CERTIFICATE-----
+  
+  intermediate-ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    # TODO: Replace with actual Intermediate CA from step-ca
+    # Fetch: curl -k https://192.168.0.55:443/roots.pem
+    # Copy content here
+    -----END CERTIFICATE-----
+
+---
+# Step 4: Create Secret for step-ca API authentication
+# Generate JWK provisioner token or API key from step-ca
+apiVersion: v1
+kind: Secret
+metadata:
+  name: step-ca-provisioner
+  namespace: baker-street-pki
+type: Opaque
+stringData:
+  # Option 1: Provisioner password
+  password: "your-provisioner-password"
+  
+  # Option 2: API token (generate with: step ca token your-cn)
+  # token: "your-one-time-token"
+
+---
+# Step 5: Create ClusterIssuer for step-ca (ACME mode)
+# This requires step-ca ACME provisioner to be configured
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: baker-street-ca-acme
+spec:
+  acme:
+    server: https://192.168.0.236:8443/acme/acme/directory
+    skipTLSVerify: false  # Set to false once CA chain is trusted
+    caBundle: |
+      # Base64-encoded CA bundle
+      # Get with: cat /etc/ssl/certs/baker-street-root-ca.crt | base64 -w 0
+    privateKeySecretRef:
+      name: baker-street-acme-account-key
+    solvers:
+    - http01:
+        ingress:
+          class: traefik  # K3s default ingress
+
+---
+# Step 6: Alternative ClusterIssuer (CA mode - direct signing)
+# Use this if ACME is not configured on step-ca
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: baker-street-ca-direct
+spec:
+  ca:
+    secretName: baker-street-ca-keypair  # Created below
+
+---
+# Step 7: Secret with CA certificate and key for direct signing
+# This requires exporting the step-ca intermediate cert + key
+# SECURITY: Only use in trusted environments
+apiVersion: v1
+kind: Secret
+metadata:
+  name: baker-street-ca-keypair
+  namespace: baker-street-pki
+type: kubernetes.io/tls
+data:
+  # Base64-encoded intermediate CA certificate
+  tls.crt: |
+    # TODO: Export from step-ca:
+    # On bakerservices: sudo cat /etc/step-ca/certs/intermediate_ca.crt | base64 -w 0
+  
+  # Base64-encoded intermediate CA private key
+  # WARNING: Highly sensitive! Store securely!
+  tls.key: |
+    # TODO: Export from step-ca (CAREFUL!):
+    # On bakerservices: sudo cat /etc/step-ca/secrets/intermediate_ca_key | base64 -w 0
+
+---
+# Step 8: Example Certificate resource for PowerDNS ns1
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: powerdns-ns1-tls
+  namespace: default
+spec:
+  secretName: powerdns-ns1-tls-secret
+  issuerRef:
+    name: baker-street-ca-acme  # Or baker-street-ca-direct
+    kind: ClusterIssuer
+  commonName: ns1.bakerstreetlabs.io
+  dnsNames:
+  - ns1.bakerstreetlabs.io
+  - ns1.bakerstreetlabs.local
+  - 192.168.0.10
+  duration: 2160h  # 90 days
+  renewBefore: 360h  # Renew 15 days before expiry
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+
+---
+# Step 9: Example Certificate for PowerDNS ns2
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: powerdns-ns2-tls
+  namespace: default
+spec:
+  secretName: powerdns-ns2-tls-secret
+  issuerRef:
+    name: baker-street-ca-acme
+    kind: ClusterIssuer
+  commonName: ns2.bakerstreetlabs.io
+  dnsNames:
+  - ns2.bakerstreetlabs.io
+  - ns2.bakerstreetlabs.local
+  - 192.168.0.11
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+
+---
+# Step 10: Example Certificate for DNS API
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: dns-api-tls
+  namespace: default
+spec:
+  secretName: dns-api-tls-secret
+  issuerRef:
+    name: baker-street-ca-acme
+    kind: ClusterIssuer
+  commonName: dns-api.bakerstreetlabs.io
+  dnsNames:
+  - dns-api.bakerstreetlabs.io
+  - api.bakerstreetlabs.io
+  - 192.168.0.236
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+  - client auth
+
+---
+# Deployment Instructions:
+#
+# 1. Install cert-manager:
+#    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+#    kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=300s
+#
+# 2. Update ConfigMap and Secrets with actual CA certificates and keys
+#
+# 3. Apply this file:
+#    kubectl apply -f phase3-certmanager-k8s.yaml
+#
+# 4. Verify ClusterIssuer is ready:
+#    kubectl get clusterissuer
+#    kubectl describe clusterissuer baker-street-ca-acme
+#
+# 5. Check certificate issuance:
+#    kubectl get certificates -A
+#    kubectl describe certificate powerdns-ns1-tls
+#
+# 6. View issued certificate secret:
+#    kubectl get secret powerdns-ns1-tls-secret -o yaml
+#
+# 7. Test certificate:
+#    kubectl get secret powerdns-ns1-tls-secret -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
+#
+# 8. Use certificate in PowerDNS deployment:
+#    Update powerdns deployment to mount the secret as volume:
+#    volumes:
+#    - name: tls-certs
+#      secret:
+#        secretName: powerdns-ns1-tls-secret
+#    volumeMounts:
+#    - name: tls-certs
+#      mountPath: /etc/ssl/powerdns
+#      readOnly: true
+#
+# 9. Monitor renewal:
+#    kubectl logs -n cert-manager -l app=cert-manager -f
+#
+# 10. Troubleshooting:
+#     kubectl logs -n cert-manager -l app=cert-manager --tail=100
+#     kubectl describe certificaterequest -A
+#     kubectl describe challenge -A (for ACME)
+
