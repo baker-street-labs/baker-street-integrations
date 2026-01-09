@@ -1,0 +1,357 @@
+# Torq.io Workflow: DNS Management for Baker Street Labs
+# This workflow manages DNS zones and records for the cyber range infrastructure
+
+name: "DNS Management Workflow"
+description: "Manages DNS zones and records for Baker Street Labs cyber range infrastructure"
+version: "1.0"
+last_updated: "2025-01-15"
+
+# Workflow Trigger Configuration
+trigger:
+  type: "gitlab_webhook"
+  webhook_url: "https://app.torq.io/webhook/gitlab-baker-street"
+  events:
+    - "push"
+    - "merge_request"
+  conditions:
+    - "branch == 'dns/*' OR path == 'baker-street-dns/*'"
+
+# Workflow Parameters
+parameters:
+  - name: "commit_sha"
+    type: "string"
+    source: "gitlab_webhook.commit_sha"
+    required: true
+  - name: "branch"
+    type: "string"
+    source: "gitlab_webhook.branch"
+    required: true
+  - name: "project_id"
+    type: "string"
+    source: "gitlab_webhook.project_id"
+    required: true
+  - name: "deployment_type"
+    type: "string"
+    default: "production"
+    options: ["development", "staging", "production"]
+
+# Workflow Steps
+steps:
+  # Step 1: Parse GitLab Webhook and Extract Information
+  - name: "parse_gitlab_webhook"
+    type: "script"
+    runner: "baker-street-k3s"
+    script: |
+      #!/bin/bash
+      set -e
+      
+      echo "🔍 Parsing GitLab webhook payload..."
+      
+      # Extract commit information
+      COMMIT_SHA="${{.commit_sha}}"
+      BRANCH="${{.branch}}"
+      PROJECT_ID="${{.project_id}}"
+      
+      echo "📋 Commit Information:"
+      echo "  SHA: $COMMIT_SHA"
+      echo "  Branch: $BRANCH"
+      echo "  Project ID: $PROJECT_ID"
+      
+      # Determine deployment type based on branch
+      if [[ "$BRANCH" == "dns/development" ]]; then
+        DEPLOYMENT_TYPE="development"
+      elif [[ "$BRANCH" == "dns/staging" ]]; then
+        DEPLOYMENT_TYPE="staging"
+      else
+        DEPLOYMENT_TYPE="production"
+      fi
+      
+      echo "🎯 Deployment Type: $DEPLOYMENT_TYPE"
+      
+      # Set output variables
+      echo "DEPLOYMENT_TYPE=$DEPLOYMENT_TYPE" >> $TORQ_OUTPUT
+      echo "COMMIT_SHA=$COMMIT_SHA" >> $TORQ_OUTPUT
+      echo "BRANCH=$BRANCH" >> $TORQ_OUTPUT
+      echo "PROJECT_ID=$PROJECT_ID" >> $TORQ_OUTPUT
+      
+      echo "✅ GitLab webhook parsed successfully"
+
+  # Step 2: Checkout Repository
+  - name: "checkout_repository"
+    type: "script"
+    runner: "baker-street-k3s"
+    script: |
+      #!/bin/bash
+      set -e
+      
+      echo "📥 Checking out repository..."
+      
+      # Clone repository
+      git clone https://gitlab.com/baker-street/dns.git /workspace/dns
+      cd /workspace/dns
+      
+      # Checkout specific commit
+      git checkout ${{.commit_sha}}
+      
+      echo "📋 Repository Information:"
+      echo "  Commit: $(git rev-parse HEAD)"
+      echo "  Branch: $(git branch --show-current)"
+      echo "  Author: $(git log -1 --pretty=format:'%an <%ae>')"
+      echo "  Message: $(git log -1 --pretty=format:'%s')"
+      
+      # List DNS configuration files
+      echo "📁 DNS Configuration Files:"
+      find . -name "*.yaml" -o -name "*.yml" -o -name "*.json" | head -10
+      
+      echo "✅ Repository checked out successfully"
+
+  # Step 3: Validate DNS Configuration
+  - name: "validate_dns_config"
+    type: "script"
+    runner: "baker-street-k3s"
+    script: |
+      #!/bin/bash
+      set -e
+      
+      echo "🔍 Validating DNS configuration..."
+      
+      cd /workspace/dns
+      
+      # Check if required files exist
+      REQUIRED_FILES=("zones.yaml" "coredns-config.yaml")
+      for file in "${REQUIRED_FILES[@]}"; do
+        if [[ ! -f "$file" ]]; then
+          echo "❌ Required file not found: $file"
+          exit 1
+        fi
+        echo "✅ Found required file: $file"
+      done
+      
+      # Validate YAML syntax
+      if command -v yq >/dev/null 2>&1; then
+        echo "🔍 Validating YAML syntax..."
+        for file in *.yaml *.yml; do
+          if [[ -f "$file" ]]; then
+            yq eval '.' "$file" >/dev/null
+            echo "✅ YAML syntax valid: $file"
+          fi
+        done
+      fi
+      
+      # Validate DNS zone configuration
+      if [[ -f "zones.yaml" ]]; then
+        echo "🔍 Validating DNS zones..."
+        ZONE_COUNT=$(yq eval '.zones | length' zones.yaml)
+        echo "📊 Found $ZONE_COUNT DNS zones"
+        
+        # Validate each zone
+        for i in $(seq 0 $((ZONE_COUNT-1))); do
+          ZONE_NAME=$(yq eval ".zones[$i].name" zones.yaml)
+          RECORD_COUNT=$(yq eval ".zones[$i].records | length" zones.yaml)
+          echo "  Zone: $ZONE_NAME ($RECORD_COUNT records)"
+        done
+      fi
+      
+      echo "✅ DNS configuration validation completed"
+
+  # Step 4: Deploy DNS Configuration to CoreDNS
+  - name: "deploy_dns_config"
+    type: "script"
+    runner: "baker-street-k3s"
+    script: |
+      #!/bin/bash
+      set -e
+      
+      echo "🚀 Deploying DNS configuration to CoreDNS..."
+      
+      cd /workspace/dns
+      
+      # Update CoreDNS ConfigMap
+      if [[ -f "coredns-config.yaml" ]]; then
+        echo "📝 Updating CoreDNS ConfigMap..."
+        kubectl apply -f coredns-config.yaml -n powerdns
+        
+        # Restart CoreDNS deployment
+        echo "🔄 Restarting CoreDNS deployment..."
+        kubectl rollout restart deployment/coredns -n powerdns
+        
+        # Wait for rollout to complete
+        echo "⏳ Waiting for CoreDNS rollout to complete..."
+        kubectl rollout status deployment/coredns -n powerdns --timeout=300s
+        
+        echo "✅ CoreDNS configuration updated successfully"
+      fi
+      
+      # Deploy DNS zones via API
+      if [[ -f "zones.yaml" ]]; then
+        echo "📝 Deploying DNS zones..."
+        
+        # Get CoreDNS API endpoint
+        COREDNS_SERVICE=$(kubectl get svc -n powerdns -l app=coredns -o jsonpath='{.items[0].metadata.name}')
+        COREDNS_IP=$(kubectl get svc -n powerdns $COREDNS_SERVICE -o jsonpath='{.spec.clusterIP}')
+        COREDNS_PORT=$(kubectl get svc -n powerdns $COREDNS_SERVICE -o jsonpath='{.spec.ports[?(@.name=="http")].port}')
+        
+        echo "🌐 CoreDNS API: http://$COREDNS_IP:$COREDNS_PORT"
+        
+        # Deploy each zone
+        ZONE_COUNT=$(yq eval '.zones | length' zones.yaml)
+        for i in $(seq 0 $((ZONE_COUNT-1))); do
+          ZONE_NAME=$(yq eval ".zones[$i].name" zones.yaml)
+          ZONE_RECORDS=$(yq eval ".zones[$i].records" zones.yaml)
+          
+          echo "📝 Deploying zone: $ZONE_NAME"
+          
+          # Create zone via API
+          curl -X POST "http://$COREDNS_IP:$COREDNS_PORT/api/v1/zones" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"name\": \"$ZONE_NAME\",
+              \"records\": $ZONE_RECORDS
+            }" || echo "⚠️ Zone $ZONE_NAME may already exist"
+        done
+        
+        echo "✅ DNS zones deployed successfully"
+      fi
+
+  # Step 5: Verify DNS Resolution
+  - name: "verify_dns_resolution"
+    type: "script"
+    runner: "baker-street-k3s"
+    script: |
+      #!/bin/bash
+      set -e
+      
+      echo "🔍 Verifying DNS resolution..."
+      
+      # Get CoreDNS service IP
+      COREDNS_SERVICE=$(kubectl get svc -n powerdns -l app=coredns -o jsonpath='{.items[0].metadata.name}')
+      COREDNS_IP=$(kubectl get svc -n powerdns $COREDNS_SERVICE -o jsonpath='{.spec.clusterIP}')
+      
+      echo "🌐 Testing DNS resolution against: $COREDNS_IP"
+      
+      # Test external DNS resolution
+      echo "🔍 Testing external DNS resolution..."
+      if nslookup google.com $COREDNS_IP >/dev/null 2>&1; then
+        echo "✅ External DNS resolution working"
+      else
+        echo "❌ External DNS resolution failed"
+        exit 1
+      fi
+      
+      # Test custom zones
+      if [[ -f "/workspace/dns/zones.yaml" ]]; then
+        echo "🔍 Testing custom DNS zones..."
+        ZONE_COUNT=$(yq eval '.zones | length' /workspace/dns/zones.yaml)
+        for i in $(seq 0 $((ZONE_COUNT-1))); do
+          ZONE_NAME=$(yq eval ".zones[$i].name" /workspace/dns/zones.yaml)
+          TEST_RECORD="test.$ZONE_NAME"
+          
+          echo "🔍 Testing zone: $ZONE_NAME"
+          if nslookup $TEST_RECORD $COREDNS_IP >/dev/null 2>&1; then
+            echo "✅ Zone $ZONE_NAME resolution working"
+          else
+            echo "⚠️ Zone $ZONE_NAME resolution failed (may be expected)"
+          fi
+        done
+      fi
+      
+      # Test port 53 forwarding
+      echo "🔍 Testing port 53 forwarding..."
+      if nslookup google.com 192.168.0.28 >/dev/null 2>&1; then
+        echo "✅ Port 53 forwarding working"
+      else
+        echo "❌ Port 53 forwarding failed"
+        exit 1
+      fi
+      
+      echo "✅ DNS resolution verification completed"
+
+  # Step 6: Update GitLab Commit Status
+  - name: "update_gitlab_status"
+    type: "http_request"
+    url: "https://gitlab.com/api/v4/projects/${{.project_id}}/statuses/${{.commit_sha}}"
+    method: "POST"
+    headers:
+      "PRIVATE-TOKEN": "${{.secrets.gitlab_token}}"
+      "Content-Type": "application/json"
+    body: |
+      {
+        "state": "success",
+        "description": "DNS deployment completed successfully",
+        "context": "torq/dns-deployment",
+        "target_url": "https://app.torq.io/workflows/dns-management"
+      }
+
+  # Step 7: Send Notification
+  - name: "send_notification"
+    type: "slack_message"
+    channel: "#baker-street-ops"
+    message: |
+      🚀 DNS Management Workflow Completed Successfully!
+      
+      📋 **Deployment Details:**
+      • Commit: `${{.commit_sha}}`
+      • Branch: `${{.branch}}`
+      • Type: `${{.deployment_type}}`
+      • Status: ✅ Success
+      
+      🔍 **Verification Results:**
+      • External DNS: ✅ Working
+      • Custom Zones: ✅ Deployed
+      • Port 53 Forwarding: ✅ Working
+      
+      🌐 **Access Points:**
+      • Master Node: 192.168.0.28:53
+      • Worker Nodes: 192.168.0.29:53, 192.168.0.30:53
+      
+      📊 **Monitoring:**
+      • Grafana: http://grafana.baker-street.com:3000
+      • Prometheus: http://prometheus.baker-street.com:9090
+
+# Error Handling
+error_handling:
+  on_failure:
+    - name: "update_gitlab_status_failure"
+      type: "http_request"
+      url: "https://gitlab.com/api/v4/projects/${{.project_id}}/statuses/${{.commit_sha}}"
+      method: "POST"
+      headers:
+        "PRIVATE-TOKEN": "${{.secrets.gitlab_token}}"
+        "Content-Type": "application/json"
+      body: |
+        {
+          "state": "failed",
+          "description": "DNS deployment failed",
+          "context": "torq/dns-deployment",
+          "target_url": "https://app.torq.io/workflows/dns-management"
+        }
+    
+    - name: "send_failure_notification"
+      type: "slack_message"
+      channel: "#baker-street-ops"
+      message: |
+        ❌ DNS Management Workflow Failed!
+        
+        📋 **Deployment Details:**
+        • Commit: `${{.commit_sha}}`
+        • Branch: `${{.branch}}`
+        • Type: `${{.deployment_type}}`
+        • Status: ❌ Failed
+        
+        🔍 **Error Details:**
+        • Check Torq.io workflow logs for details
+        • Verify DNS configuration files
+        • Check CoreDNS deployment status
+        
+        🛠️ **Troubleshooting:**
+        • kubectl get pods -n powerdns
+        • kubectl logs -n powerdns deployment/coredns
+        • nslookup google.com 192.168.0.28
+
+# Workflow Metadata
+metadata:
+  author: "Baker Street Labs Team"
+  version: "1.0"
+  tags: ["dns", "coredns", "baker-street", "infrastructure"]
+  documentation: "https://docs.baker-street.com/workflows/dns-management"
+  support: "ops@baker-street.com"

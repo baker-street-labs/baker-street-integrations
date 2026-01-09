@@ -1,0 +1,613 @@
+# Baker Street Labs Cyber Range IPAM Configuration
+# Cortex Labs Cyber Range Infrastructure Management
+
+# Master Router Configuration (PAN-OS)
+master_router:
+  management:
+    vlan: 900
+    ip: "192.168.0.254"
+    description: "PAN-OS Management Interface"
+    interface: "mgmt"
+  
+  ethernet1_1:
+    vlan: 900
+    ip: "192.168.0.1"
+    description: "Primary Data Interface"
+    interface: "ethernet1/1"
+  
+  router_vlan:
+    vlan: 901
+    ip: "192.168.1.1"
+    description: "Internal Router VLAN"
+    interface: "ethernet1/2"
+  
+  api_credentials:
+    username: "admin"
+    password: "Paloalto1!"
+    api_port: 443
+    timeout: 30
+
+# Core Infrastructure VLANs
+core_infrastructure:
+  dirty_net:
+    vlan: 900
+    network: "192.168.0.0/16"
+    gateway: "192.168.0.1"
+    description: "Master egress and security boundary"
+  
+  iscsi:
+    vlan: 600
+    network: "172.24.254.0/24"
+    gateway: "172.24.254.1"
+    description: "Local iSCSI storage"
+  
+  vmotion:
+    vlan: 611
+    network: "172.22.254.0/24"
+    gateway: "172.22.254.1"
+    description: "vMotion network"
+  
+  ilo:
+    vlan: 100
+    network: "10.55.250.0/26"
+    gateway: "10.55.250.1"
+    description: "iLO management"
+  
+  oobm:
+    vlan: 105
+    network: "10.55.250.64/26"
+    gateway: "10.55.250.65"
+    description: "Out-of-band management (formerly icarus-mgmt)"
+
+# DNS and Active Directory Configuration
+dns_ad:
+  dns_servers:
+    primary:
+      ip: "192.168.0.10"
+      vlan: 900
+      hostname: "ns1.bakerstreetlabs.local"
+    
+    secondary:
+      ip: "192.168.0.11"
+      vlan: 900
+      hostname: "ns2.bakerstreetlabs.local"
+  
+  active_directory:
+    domain: "bakerstreetlabs.local"
+    domain_controllers:
+      - ip: "192.168.0.20"
+        vlan: 900
+        hostname: "dc1.bakerstreetlabs.local"
+      - ip: "192.168.0.21"
+        vlan: 900
+        hostname: "dc2.bakerstreetlabs.local"
+    
+    dns_servers: ["192.168.0.10", "192.168.0.11"]
+    domain_services: ["DNS", "DHCP", "Certificate Services"]
+
+# Cyber Range Definitions
+cyber_ranges:
+  se_demo_xdr:
+    name: "SE DEMO XDR"
+    description: "Cortex XDR Demonstration Environment"
+    vlan_base: 1000
+    ip_base: "10.13.0.0/16"
+    range_tag: "rangexdr"
+    status: "active"
+    
+    vlans:
+      public:
+        vlan_id: 1001
+        network: "10.13.1.0/24"
+        gateway: "10.13.1.20"
+        border: "10.13.1.254"
+        description: "Public-facing services and DMZ"
+      
+      users:
+        vlan_id: 1002
+        network: "10.13.2.0/24"
+        gateway: "10.13.2.20"
+        description: "User workstations and endpoints"
+      
+      daas:
+        vlan_id: 1003
+        network: "10.13.3.0/24"
+        gateway: "10.13.3.20"
+        description: "Data Analytics and AI Services"
+      
+      critical:
+        vlan_id: 1004
+        network: "10.13.4.0/24"
+        gateway: "10.13.4.20"
+        description: "Critical infrastructure and services"
+      
+      iot:
+        vlan_id: 1005
+        network: "10.13.5.0/24"
+        gateway: "10.13.5.20"
+        description: "IoT devices and sensors"
+      
+      transit:
+        vlan_id: 1006
+        network: "10.13.6.0/24"
+        gateway: "10.13.6.20"
+        description: "Transit and inter-zone communication"
+
+  se_demo_xsiam:
+    name: "SE DEMO XSIAM"
+    description: "Cortex XSIAM Demonstration Environment"
+    vlan_base: 2000
+    ip_base: "10.14.0.0/16"
+    range_tag: "rangexsiam"
+    status: "active"
+    
+    vlans:
+      public:
+        vlan_id: 2001
+        network: "10.14.1.0/24"
+        gateway: "10.14.1.20"
+        border: "10.14.1.254"
+        description: "Public-facing services and DMZ"
+      
+      users:
+        vlan_id: 2002
+        network: "10.14.2.0/24"
+        gateway: "10.14.2.20"
+        description: "User workstations and endpoints"
+      
+      daas:
+        vlan_id: 2003
+        network: "10.14.3.0/24"
+        gateway: "10.14.3.20"
+        description: "Data Analytics and AI Services"
+      
+      critical:
+        vlan_id: 2004
+        network: "10.14.4.0/24"
+        gateway: "10.14.4.20"
+        description: "Critical infrastructure and services"
+      
+      iot:
+        vlan_id: 2005
+        network: "10.14.5.0/24"
+        gateway: "10.14.5.20"
+        description: "IoT devices and sensors"
+      
+      transit:
+        vlan_id: 2006
+        network: "10.14.6.0/24"
+        gateway: "10.14.6.20"
+        description: "Transit and inter-zone communication"
+
+  se_demo_platform:
+    name: "SE DEMO Platform"
+    description: "Cortex Platform Demonstration Environment"
+    vlan_base: 3000
+    ip_base: "172.21.0.0/16"
+    status: "active"
+    
+    vlans:
+      public:
+        vlan_id: 3001
+        network: "172.21.55.0/24"
+        gateway: "172.21.55.20"
+        border: "172.21.55.254"
+        description: "Public-facing services and DMZ"
+      
+      users:
+        vlan_id: 3002
+        network: "172.21.45.0/24"
+        gateway: "172.21.45.20"
+        description: "User workstations and endpoints"
+      
+      daas:
+        vlan_id: 3003
+        network: "172.21.35.0/24"
+        gateway: "172.21.35.20"
+        description: "Data Analytics and AI Services"
+      
+      critical:
+        vlan_id: 3004
+        network: "172.21.25.0/24"
+        gateway: "172.21.25.20"
+        description: "Critical infrastructure and services"
+      
+      iot:
+        vlan_id: 3005
+        network: "172.21.15.0/24"
+        gateway: "172.21.15.20"
+        description: "IoT devices and sensors"
+      
+      transit:
+        vlan_id: 3006
+        network: "172.21.65.0/24"
+        gateway: "172.21.65.20"
+        description: "Transit and inter-zone communication"
+
+  se_demo_research:
+    name: "SE DEMO Research"
+    description: "Research and Development Environment"
+    vlan_base: 4000
+    ip_base: "10.1.0.0/16"
+    status: "active"
+    
+    vlans:
+      network_1:
+        vlan_id: 4001
+        network: "10.1.0.0/24"
+        gateway: "10.1.0.1"
+        description: "Research Network 1"
+      
+      network_2:
+        vlan_id: 4002
+        network: "10.2.0.0/24"
+        gateway: "10.2.0.1"
+        description: "Research Network 2"
+      
+      network_3:
+        vlan_id: 4003
+        network: "10.3.0.0/24"
+        gateway: "10.3.0.1"
+        description: "Research Network 3"
+      
+      network_4:
+        vlan_id: 4004
+        network: "10.4.0.0/24"
+        gateway: "10.4.0.1"
+        description: "Research Network 4"
+      
+      network_5:
+        vlan_id: 4005
+        network: "10.5.0.0/24"
+        gateway: "10.5.0.1"
+        description: "Research Network 5"
+      
+      network_6:
+        vlan_id: 4006
+        network: "10.6.0.0/24"
+        gateway: "10.6.0.1"
+        description: "Research Network 6"
+      
+      network_7:
+        vlan_id: 4007
+        network: "10.7.0.0/24"
+        gateway: "10.7.0.1"
+        description: "Research Network 7"
+      
+      network_8:
+        vlan_id: 4008
+        network: "10.8.0.0/24"
+        gateway: "10.8.0.1"
+        description: "Research Network 8"
+      
+      network_9:
+        vlan_id: 4009
+        network: "10.9.0.0/24"
+        gateway: "10.9.0.1"
+        description: "Research Network 9"
+      
+      network_10:
+        vlan_id: 4010
+        network: "10.10.0.0/24"
+        gateway: "10.10.0.1"
+        description: "Research Network 10"
+      
+      network_11:
+        vlan_id: 4011
+        network: "10.11.0.0/24"
+        gateway: "10.11.0.1"
+        description: "Research Network 11"
+      
+      network_12:
+        vlan_id: 4012
+        network: "10.12.0.0/24"
+        gateway: "10.12.0.1"
+        description: "Research Network 12"
+
+# Reserved IP Allocations
+reserved_ips:
+  # Master Router
+  master_router_mgmt: "192.168.0.254"
+  master_router_data: "192.168.0.1"
+  master_router_internal: "192.168.1.1"
+  
+  # DNS Servers
+  dns_primary: "192.168.0.10"
+  dns_secondary: "192.168.0.11"
+  
+  # Active Directory
+  ad_dc1: "192.168.0.20"
+  ad_dc2: "192.168.0.21"
+  
+  # Core Infrastructure
+  vcenter: "10.55.250.65"
+  esxi_hosts: "10.55.250.66-70"
+  guacamole: "10.55.250.193"
+  reverse_proxy: "10.55.250.129"
+  
+  # Storage
+  iscsi_gateway: "172.24.254.1"
+  vmotion_gateway: "172.22.254.1"
+  
+  # Cyber Range Reserved IPs (per range)
+  cyber_range_reserved:
+    gateway: ".20"  # For 172.21.x.0/24 networks
+    border: ".254"  # For border routers
+    dns: [".10", ".11"]  # DNS servers
+    management: ".100-.110"  # Management systems
+    monitoring: ".200-.210"  # Monitoring systems
+
+# IP Allocation Policies
+allocation_policies:
+  automatic:
+    # Standard allocation for workstations
+    workstation_ips: "172.21.{45,35,25,15}.{100-200}"
+    server_ips: "172.21.{45,35,25,15}.{10-99}"
+    network_ips: "172.21.{45,35,25,15}.{1-9}"
+    
+    # Research network allocation
+    research_workstation_ips: "10.{1-12}.0.{100-200}"
+    research_server_ips: "10.{1-12}.0.{10-99}"
+    research_network_ips: "10.{1-12}.0.{1-9}"
+  
+  reserved:
+    # Infrastructure reserved IPs
+    gateway_ips: "172.21.{55,45,35,25,15,65}.20"
+    border_ips: "172.21.{55,45,35,25,15,65}.254"
+    dns_ips: "172.21.{55,45,35,25,15,65}.{10,11}"
+    
+    # Research network reserved IPs
+    research_gateway_ips: "10.{1-12}.0.1"
+    research_dns_ips: "10.{1-12}.0.{10,11}"
+  
+  special:
+    # Management and monitoring
+    management_ips: "192.168.0.0/24"
+    monitoring_ips: "192.168.0.200-210"
+    
+    # Future cyber ranges
+    future_range_1: "172.22.0.0/16"
+    future_range_2: "172.23.0.0/16"
+    future_range_3: "10.13.0.0/16"
+    future_range_4: "10.14.0.0/16"
+
+# Future Cyber Range Template
+future_cyber_range_template:
+  vlan_allocation:
+    range_5: "5000-5999"
+    range_6: "6000-6999"
+    range_7: "7000-7999"
+    range_8: "8000-8999"
+  
+  ip_allocation:
+    range_5: "172.22.0.0/16"
+    range_6: "172.23.0.0/16"
+    range_7: "10.13.0.0/16"
+    range_8: "10.14.0.0/16"
+  
+  standard_vlans:
+    public: "{vlan_base}01"
+    users: "{vlan_base}02"
+    daas: "{vlan_base}03"
+    critical: "{vlan_base}04"
+    iot: "{vlan_base}05"
+    transit: "{vlan_base}06"
+
+# Database Configuration
+database:
+  host: "localhost"
+  port: 5432
+  name: "baker_street_cyber_range_ipam"
+  user: "ipam_user"
+  password: "ipam_password_2025"
+  pool_size: 20
+  max_overflow: 30
+  pool_timeout: 30
+  pool_recycle: 3600
+
+# Redis Configuration
+redis:
+  host: "localhost"
+  port: 6380
+  db: 2
+  password: ""
+  timeout: 30
+  key_prefix: "cyber_range_ipam:"
+  ttl_seconds: 3600
+
+# DNS API Integration
+dns_api:
+  base_url: "http://192.168.0.10:9090"
+  username: "admin"
+  password: "admin"
+  timeout: 30
+  retry_attempts: 3
+  retry_delay: 5
+  auto_sync: true
+
+# Route Injection Integration
+route_injection:
+  base_url: "http://localhost:5001"
+  api_key: "baker_street_route_injection_key_2025"
+  timeout: 30
+  retry_attempts: 3
+  retry_delay: 5
+  auto_inject: true
+  
+  # Master router integration
+  master_router:
+    enabled: true
+    management_ip: "192.168.0.254"
+    data_ip: "192.168.0.1"
+    internal_ip: "192.168.1.1"
+
+# Security Configuration
+security:
+  jwt_secret: "baker_street_cyber_range_ipam_jwt_secret_2025"
+  jwt_algorithm: "HS256"
+  jwt_expire_minutes: 60
+  password_hash_rounds: 12
+  api_rate_limit: 2000  # requests per hour
+  max_login_attempts: 5
+  lockout_duration_minutes: 15
+  
+  # Cyber range isolation
+  cyber_range_isolation: true
+  inter_range_communication: false
+  master_router_required: true
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  prometheus_port: 9092
+  metrics_path: "/metrics"
+  health_check_interval: 30
+  
+  alert_thresholds:
+    ip_utilization_warning: 80
+    ip_utilization_critical: 95
+    dns_sync_failures: 5
+    route_injection_failures: 5
+    master_router_connectivity: 3
+  
+  alerts:
+    - name: "High IP Utilization"
+      condition: "ip_utilization > 80"
+      severity: "warning"
+      message: "IP utilization is above 80% in cyber range {cyber_range_name}"
+    
+    - name: "Critical IP Utilization"
+      condition: "ip_utilization > 95"
+      severity: "critical"
+      message: "IP utilization is above 95% in cyber range {cyber_range_name}"
+    
+    - name: "Master Router Connectivity"
+      condition: "master_router_connectivity_failures > 3"
+      severity: "critical"
+      message: "Master router connectivity issues detected"
+    
+    - name: "Cyber Range Isolation Breach"
+      condition: "inter_range_communication_detected"
+      severity: "critical"
+      message: "Unauthorized inter-cyber range communication detected"
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "/app/logs/cyber_range_ipam.log"
+  max_size_mb: 100
+  backup_count: 5
+  console: true
+  
+  # Structured logging for JSON output
+  structured: true
+  json_format: true
+  
+  # Log levels for different components
+  components:
+    database: "INFO"
+    dns_api: "INFO"
+    route_injection: "INFO"
+    master_router: "INFO"
+    redis: "WARNING"
+    security: "INFO"
+
+# API Configuration
+api:
+  host: "0.0.0.0"
+  port: 5003
+  workers: 6
+  reload: false
+  access_log: true
+  
+  # CORS settings
+  cors:
+    enabled: true
+    origins: ["http://localhost:3000", "http://localhost:8080"]
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    headers: ["*"]
+  
+  # Rate limiting
+  rate_limit:
+    enabled: true
+    requests_per_minute: 200
+    burst_size: 50
+  
+  # Request/Response logging
+  request_logging: true
+  response_logging: false
+
+# Development Settings
+development:
+  debug: false
+  test_mode: false
+  mock_external_apis: false
+  log_requests: true
+  log_responses: false
+  
+  # Test data
+  create_test_data: false
+  test_cyber_ranges: 2
+  test_devices_per_range: 20
+  test_ips_per_range: 50
+
+# Backup Configuration
+backup:
+  enabled: true
+  frequency: "daily"
+  retention_days: 30
+  location: "/app/backups"
+  
+  # Database backup
+  database:
+    enabled: true
+    method: "pg_dump"
+    compression: "gzip"
+  
+  # Configuration backup
+  config:
+    enabled: true
+    method: "file_copy"
+    include_logs: false
+  
+  # Redis backup
+  redis:
+    enabled: true
+    method: "rdb_snapshot"
+    compression: "gzip"
+
+# Integration Settings
+integrations:
+  # Kong API Gateway
+  kong:
+    enabled: true
+    service_name: "baker-street-cyber-range-ipam"
+    service_url: "http://localhost:5003"
+    route_path: "/api/v1/cyber-range-ipam"
+    api_key: "baker_street_cyber_range_ipam_api_key_2025"
+  
+  # Prometheus Monitoring
+  prometheus:
+    enabled: true
+    scrape_interval: 30
+    metrics_path: "/metrics"
+    port: 9092
+  
+  # Grafana Dashboards
+  grafana:
+    enabled: true
+    dashboard_path: "/app/dashboards"
+    auto_provision: true
+  
+  # Master Router Integration
+  master_router:
+    enabled: true
+    type: "panos"
+    management_ip: "192.168.0.254"
+    data_ip: "192.168.0.1"
+    internal_ip: "192.168.1.1"
+    api_credentials:
+      username: "admin"
+      password: "Paloalto1!"
+      api_port: 443

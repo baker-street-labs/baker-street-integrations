@@ -1,0 +1,360 @@
+# Dedicated ACME HTTP-01 Challenge Responder
+# Baker Street Labs PKI Infrastructure
+# IP: 192.168.255.10 (dedicated for ACME challenges)
+# Node: baker-street-services-03 (192.168.0.30)
+#
+# Purpose: Provide persistent HTTP-01 challenge endpoint for StepCA ACME
+# Benefit: No conflict with Mythic C2 or other services on port 80
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: baker-street-pki
+  labels:
+    name: baker-street-pki
+    purpose: acme-challenges
+
+---
+# PersistentVolume for ACME challenge files
+# Shared storage for challenge tokens
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: acme-challenge-pv
+  labels:
+    type: local
+    purpose: acme-challenges
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /var/lib/acme-challenges
+    type: DirectoryOrCreate
+
+---
+# PersistentVolumeClaim for ACME challenges
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: acme-challenge-pvc
+  namespace: baker-street-pki
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  selector:
+    matchLabels:
+      purpose: acme-challenges
+
+---
+# ConfigMap for Nginx configuration
+# Serves only /.well-known/acme-challenge/ directory
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: acme-nginx-config
+  namespace: baker-street-pki
+data:
+  nginx.conf: |
+    user nginx;
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+        
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
+        
+        access_log /var/log/nginx/access.log main;
+        
+        sendfile on;
+        keepalive_timeout 65;
+        
+        server {
+            listen 80 default_server;
+            listen [::]:80 default_server;
+            
+            server_name _;
+            
+            # ACME HTTP-01 challenge location
+            location /.well-known/acme-challenge/ {
+                root /var/www/acme;
+                try_files $uri =404;
+                
+                # Allow all IPs (ACME validation comes from various IPs)
+                allow all;
+                
+                # Logging for debugging
+                access_log /var/log/nginx/acme-access.log main;
+                error_log /var/log/nginx/acme-error.log warn;
+            }
+            
+            # Health check endpoint
+            location /health {
+                access_log off;
+                return 200 "ACME Responder Healthy\n";
+                add_header Content-Type text/plain;
+            }
+            
+            # Reject all other requests with helpful message
+            location / {
+                return 404 "This server only responds to ACME HTTP-01 challenges at /.well-known/acme-challenge/\n";
+                add_header Content-Type text/plain;
+            }
+        }
+    }
+
+---
+# StatefulSet for ACME Responder
+# Uses hostNetwork to bind to 192.168.255.10
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: acme-responder
+  namespace: baker-street-pki
+  labels:
+    app: acme-responder
+    purpose: http01-challenge
+spec:
+  serviceName: acme-responder
+  replicas: 1
+  selector:
+    matchLabels:
+      app: acme-responder
+  template:
+    metadata:
+      labels:
+        app: acme-responder
+        purpose: http01-challenge
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9113"  # nginx-prometheus-exporter
+    spec:
+      # Deploy on services-03 (lightweight node)
+      nodeSelector:
+        kubernetes.io/hostname: baker-street-services-03
+      
+      # Use host network to bind to 192.168.255.10
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      
+      # Run as non-root for security
+      securityContext:
+        runAsUser: 101  # nginx user
+        runAsGroup: 101
+        fsGroup: 101
+      
+      containers:
+      - name: nginx
+        image: nginx:1.25-alpine
+        imagePullPolicy: IfNotPresent
+        
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
+        
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+        
+        - name: acme-challenges
+          mountPath: /var/www/acme/.well-known/acme-challenge
+          readOnly: false
+        
+        - name: nginx-logs
+          mountPath: /var/log/nginx
+        
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 2
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 2
+      
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: acme-nginx-config
+      
+      - name: acme-challenges
+        persistentVolumeClaim:
+          claimName: acme-challenge-pvc
+      
+      - name: nginx-logs
+        emptyDir: {}
+
+---
+# Headless Service (since using hostNetwork)
+apiVersion: v1
+kind: Service
+metadata:
+  name: acme-responder
+  namespace: baker-street-pki
+  labels:
+    app: acme-responder
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless since using hostNetwork
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: acme-responder
+
+---
+# ServiceMonitor for Prometheus (optional)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: acme-responder
+  namespace: baker-street-pki
+  labels:
+    app: acme-responder
+spec:
+  selector:
+    matchLabels:
+      app: acme-responder
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+
+---
+# Documentation ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: acme-responder-docs
+  namespace: baker-street-pki
+data:
+  README.md: |
+    # ACME HTTP-01 Challenge Responder
+    
+    ## Purpose
+    Dedicated HTTP server for ACME HTTP-01 challenges from StepCA.
+    Prevents conflicts with Mythic C2 and other services using port 80.
+    
+    ## Configuration
+    - **IP Address**: 192.168.255.10 (bound via hostNetwork)
+    - **Port**: 80 (HTTP only, no TLS needed for HTTP-01)
+    - **Node**: baker-street-services-03 (192.168.0.30)
+    - **Challenge Path**: /.well-known/acme-challenge/
+    
+    ## Usage with StepCA
+    
+    ### Configure ACME Client (cert-bot, step, etc.)
+    ```bash
+    # Example with step CLI
+    step ca certificate example.com cert.crt key.key \
+      --ca-url https://192.168.0.236:8443 \
+      --root /usr/local/share/ca-certificates/baker-street-ca-chain.crt \
+      --provisioner acme \
+      --san example.com \
+      --http-listen :80  # Uses 192.168.255.10:80 automatically
+    ```
+    
+    ### Verify ACME Responder
+    ```bash
+    # Health check
+    curl http://192.168.255.10/health
+    
+    # Test challenge directory
+    curl http://192.168.255.10/.well-known/acme-challenge/test
+    
+    # Should return 404 (expected when no challenge exists)
+    ```
+    
+    ## Troubleshooting
+    
+    ### Check pod status
+    ```bash
+    kubectl get pods -n baker-street-pki
+    kubectl logs -n baker-street-pki acme-responder-0
+    ```
+    
+    ### Check IP binding
+    ```bash
+    kubectl exec -n baker-street-pki acme-responder-0 -- netstat -tuln | grep :80
+    ```
+    
+    ### Monitor ACME challenges
+    ```bash
+    # Watch for incoming challenge requests
+    kubectl logs -n baker-street-pki acme-responder-0 -f | grep acme-challenge
+    ```
+    
+    ### Manually place challenge file (for testing)
+    ```bash
+    kubectl exec -n baker-street-pki acme-responder-0 -- \
+      sh -c 'echo "test-challenge-content" > /var/www/acme/.well-known/acme-challenge/test-token'
+    
+    curl http://192.168.255.10/.well-known/acme-challenge/test-token
+    # Should return: test-challenge-content
+    ```
+    
+    ## Integration with cert-manager
+    
+    Update ClusterIssuer to use this responder:
+    ```yaml
+    apiVersion: cert-manager.io/v1
+    kind: ClusterIssuer
+    metadata:
+      name: baker-street-ca-acme
+    spec:
+      acme:
+        server: https://192.168.0.236:8443/acme/acme/directory
+        privateKeySecretRef:
+          name: baker-street-acme-account-key
+        solvers:
+        - http01:
+            ingress:
+              class: nginx
+              podTemplate:
+                spec:
+                  nodeSelector:
+                    kubernetes.io/hostname: baker-street-services-03
+    ```
+    
+    ## Security Notes
+    - HTTP-01 challenges MUST use HTTP (not HTTPS)
+    - Only serves /.well-known/acme-challenge/ path
+    - All other requests return 404
+    - No sensitive data exposed
+    - Read-only filesystem except challenge directory
+

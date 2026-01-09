@@ -1,0 +1,201 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for IPAM
+  ipam-postgres:
+    image: postgres:15-alpine
+    container_name: baker-street-ipam-postgres
+    environment:
+      POSTGRES_DB: baker_street_ipam
+      POSTGRES_USER: ipam_user
+      POSTGRES_PASSWORD: ipam_password_2025
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - ipam_postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5433:5432"
+    networks:
+      - ipam-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ipam_user -d baker_street_ipam"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Redis for IPAM Caching
+  ipam-redis:
+    image: redis:7-alpine
+    container_name: baker-street-ipam-redis
+    command: redis-server --appendonly yes --requirepass ipam_redis_password_2025
+    volumes:
+      - ipam_redis_data:/data
+    ports:
+      - "6381:6379"
+    networks:
+      - ipam-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Baker Street IPAM Service
+  ipam-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.ipam
+    container_name: baker-street-ipam-service
+    environment:
+      # Database Configuration
+      DB_HOST: ipam-postgres
+      DB_PORT: 5432
+      DB_NAME: baker_street_ipam
+      DB_USER: ipam_user
+      DB_PASSWORD: ipam_password_2025
+      
+      # Redis Configuration
+      REDIS_HOST: ipam-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ipam_redis_password_2025
+      REDIS_DB: 1
+      
+      # DNS API Configuration
+      DNS_API_URL: http://10.43.20.75:9090
+      DNS_API_USERNAME: admin
+      DNS_API_PASSWORD: admin
+      
+      # Route Injection Configuration
+      ROUTE_INJECTION_URL: http://route-injection-service:5001
+      ROUTE_INJECTION_API_KEY: baker_street_route_injection_key_2025
+      
+      # Security Configuration
+      JWT_SECRET: baker_street_ipam_jwt_secret_2025_very_secure
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: 60
+      
+      # Service Configuration
+      API_HOST: 0.0.0.0
+      API_PORT: 5002
+      LOG_LEVEL: INFO
+      DEBUG: false
+      
+    volumes:
+      - ./ipam_config.yaml:/app/ipam_config.yaml:ro
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    ports:
+      - "5002:5002"
+    networks:
+      - ipam-network
+      - route-injector-network  # Connect to route injection network
+    depends_on:
+      ipam-postgres:
+        condition: service_healthy
+      ipam-redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Prometheus for IPAM Monitoring
+  ipam-prometheus:
+    image: prom/prometheus:latest
+    container_name: baker-street-ipam-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    volumes:
+      - ./monitoring/prometheus-ipam.yml:/etc/prometheus/prometheus.yml:ro
+      - ipam_prometheus_data:/prometheus
+    ports:
+      - "9091:9090"
+    networks:
+      - ipam-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Grafana for IPAM Dashboards
+  ipam-grafana:
+    image: grafana/grafana:latest
+    container_name: baker-street-ipam-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ipam_grafana_password_2025
+      GF_USERS_ALLOW_SIGN_UP: false
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - ipam_grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - ipam-network
+    depends_on:
+      - ipam-prometheus
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # IPAM Web Interface (Optional)
+  ipam-web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: baker-street-ipam-web
+    environment:
+      REACT_APP_API_URL: http://localhost:5002
+      REACT_APP_WS_URL: ws://localhost:5002
+    ports:
+      - "3002:3000"
+    networks:
+      - ipam-network
+    depends_on:
+      - ipam-service
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  ipam_postgres_data:
+    driver: local
+  ipam_redis_data:
+    driver: local
+  ipam_prometheus_data:
+    driver: local
+  ipam_grafana_data:
+    driver: local
+
+networks:
+  ipam-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.26.0.0/16
+  route-injector-network:
+    external: true

@@ -1,0 +1,202 @@
+# Torq.io Integration Configuration for Baker Street Labs
+# This configuration file defines the Torq.io workspace settings and integrations
+
+version: "1.0"
+last_updated: "2025-01-15"
+description: "Torq.io integration configuration for Baker Street Labs cyber range"
+
+# Torq.io Workspace Configuration
+torq:
+  workspace_id: "${TORQ_WORKSPACE_ID}"
+  api_token: "${TORQ_API_TOKEN}"
+  base_url: "https://app.torq.io"
+  
+  # Self-Hosted Runners Configuration
+  runners:
+    k3s_runner:
+      name: "baker-street-k3s"
+      labels: ["k3s", "ansible", "docker", "kubectl", "baker-street"]
+      max_concurrent: 5
+      timeout: 3600  # 1 hour
+      capabilities:
+        - "kubernetes"
+        - "ansible"
+        - "docker"
+        - "bash"
+        - "python"
+        - "powershell"
+    
+    cloud_runner:
+      name: "baker-street-cloud"
+      labels: ["aws", "azure", "gcp", "terraform", "cloud"]
+      max_concurrent: 3
+      timeout: 1800  # 30 minutes
+      capabilities:
+        - "terraform"
+        - "aws-cli"
+        - "azure-cli"
+        - "gcloud"
+        - "python"
+        - "bash"
+
+# Integration Configurations
+integrations:
+  gitlab:
+    webhook_url: "https://app.torq.io/webhook/gitlab-baker-street"
+    secret_token: "${GITLAB_WEBHOOK_SECRET}"
+    project_id: "${GITLAB_PROJECT_ID}"
+    api_token: "${GITLAB_API_TOKEN}"
+    base_url: "https://gitlab.com"
+    
+  slack:
+    webhook_url: "https://app.torq.io/webhook/slack-baker-street"
+    bot_token: "${SLACK_BOT_TOKEN}"
+    app_token: "${SLACK_APP_TOKEN}"
+    default_channel: "#baker-street-ops"
+    
+  monitoring:
+    prometheus:
+      url: "http://prometheus.baker-street.com:9090"
+      api_token: "${PROMETHEUS_API_TOKEN}"
+    
+    grafana:
+      url: "http://grafana.baker-street.com:3000"
+      api_token: "${GRAFANA_API_TOKEN}"
+    
+    elasticsearch:
+      url: "http://elasticsearch.baker-street.com:9200"
+      username: "${ELASTICSEARCH_USERNAME}"
+      password: "${ELASTICSEARCH_PASSWORD}"
+
+# Workflow Configuration
+workflows:
+  dns_management:
+    name: "DNS Management Workflow"
+    description: "Manages DNS zones and records for Baker Street Labs"
+    trigger: "gitlab_webhook"
+    runner: "k3s_runner"
+    timeout: 600  # 10 minutes
+    
+  traffic_generation:
+    name: "Traffic Generation Workflow"
+    description: "Generates realistic network traffic for testing"
+    trigger: "scheduled"
+    schedule: "0 */6 * * *"  # Every 6 hours
+    runner: "k3s_runner"
+    timeout: 1800  # 30 minutes
+    
+  mythic_deployment:
+    name: "Mythic C2 Deployment Workflow"
+    description: "Deploys and manages Mythic C2 infrastructure"
+    trigger: "on_demand"
+    runner: "k3s_runner"
+    timeout: 1200  # 20 minutes
+    
+  lab_provisioning:
+    name: "Lab Provisioning Workflow"
+    description: "Self-service lab environment provisioning"
+    trigger: "slack_command"
+    runner: "k3s_runner"
+    timeout: 900  # 15 minutes
+    
+  cost_management:
+    name: "Cost Management Workflow"
+    description: "Automated cost optimization and resource cleanup"
+    trigger: "scheduled"
+    schedule: "0 0 * * *"  # Daily at midnight
+    runner: "k3s_runner"
+    timeout: 3600  # 1 hour
+
+# Security Configuration
+security:
+  secrets_management:
+    provider: "torq_secrets"
+    encryption: "AES-256"
+    
+  access_control:
+    rbac_enabled: true
+    default_role: "viewer"
+    admin_roles: ["admin", "super_admin"]
+    
+  audit_logging:
+    enabled: true
+    retention_days: 90
+    log_level: "INFO"
+
+# Monitoring and Alerting
+monitoring:
+  health_checks:
+    enabled: true
+    interval: 300  # 5 minutes
+    timeout: 30
+    
+  alerting:
+    enabled: true
+    channels:
+      - "slack"
+      - "email"
+    thresholds:
+      workflow_failure_rate: 5  # 5%
+      runner_unavailable: 1  # 1 runner
+      high_resource_usage: 80  # 80%
+
+# Performance Configuration
+performance:
+  concurrency:
+    max_workflows: 10
+    max_steps_per_workflow: 50
+    
+  caching:
+    enabled: true
+    ttl: 3600  # 1 hour
+    
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 100
+
+# Environment-Specific Overrides
+environments:
+  development:
+    torq:
+      base_url: "https://dev.torq.io"
+    runners:
+      k3s_runner:
+        max_concurrent: 2
+    workflows:
+      dns_management:
+        timeout: 300  # 5 minutes
+        
+  staging:
+    torq:
+      base_url: "https://staging.torq.io"
+    runners:
+      k3s_runner:
+        max_concurrent: 3
+        
+  production:
+    torq:
+      base_url: "https://app.torq.io"
+    runners:
+      k3s_runner:
+        max_concurrent: 5
+    monitoring:
+      alerting:
+        enabled: true
+        channels: ["slack", "email", "pagerduty"]
+
+# Migration Configuration
+migration:
+  legacy_support:
+    enabled: true
+    fallback_enabled: true
+    timeout: 7200  # 2 hours
+    
+  rollback:
+    enabled: true
+    automatic_rollback: false
+    rollback_threshold: 3  # failures
+    
+  testing:
+    enabled: true
+    test_workflows: true
+    validate_integrations: true

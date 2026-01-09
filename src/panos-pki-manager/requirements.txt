@@ -1,0 +1,40 @@
+# PAN-OS PKI Manager - Python Dependencies
+# Baker Street Labs - Firewall Certificate Management
+
+# PAN-OS API Interaction
+pan-os-python>=1.11.0
+
+# Windows Remote Management
+pywinrm>=0.4.3
+requests-kerberos>=0.14.0  # For Kerberos authentication with WinRM
+requests-ntlm>=1.2.0  # Fallback NTLM authentication
+
+# Certificate and Cryptography Operations
+cryptography>=41.0.0
+pyOpenSSL>=23.3.0
+
+# Configuration Management
+PyYAML>=6.0.1
+python-dotenv>=1.0.0
+
+# Logging and Output
+colorlog>=6.7.0
+rich>=13.6.0  # For beautiful console output
+
+# XML Parsing (for PAN-OS API responses)
+lxml>=4.9.3
+
+# Date/Time Handling
+python-dateutil>=2.8.2
+
+# Optional: Testing Dependencies
+pytest>=7.4.0
+pytest-mock>=3.12.0
+pytest-cov>=4.1.0
+responses>=0.23.0  # For mocking HTTP requests
+
+# Optional: Type Checking
+mypy>=1.5.0
+types-PyYAML>=6.0.12
+types-requests>=2.31.0
+

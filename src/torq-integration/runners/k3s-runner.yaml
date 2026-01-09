@@ -1,0 +1,229 @@
+# Torq.io Self-Hosted Runner for K3s Cluster
+# This deployment creates a Torq runner that can execute workflows within the K3s cluster
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: torq-runner
+  namespace: torq-automation
+  labels:
+    app: torq-runner
+    component: automation
+    managed-by: torq
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: torq-runner
+  template:
+    metadata:
+      labels:
+        app: torq-runner
+        component: automation
+        managed-by: torq
+    spec:
+      serviceAccountName: torq-runner
+      containers:
+      - name: torq-runner
+        image: torq/runner:latest
+        imagePullPolicy: Always
+        env:
+        - name: TORQ_RUNNER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: torq-runner-secret
+              key: token
+        - name: TORQ_RUNNER_LABELS
+          value: "k3s,ansible,docker,kubectl,baker-street"
+        - name: TORQ_RUNNER_MAX_CONCURRENT
+          value: "5"
+        - name: TORQ_RUNNER_TIMEOUT
+          value: "3600"
+        - name: KUBECONFIG
+          value: "/root/.kube/config"
+        - name: ANSIBLE_INVENTORY_PATH
+          value: "/opt/ansible/inventory"
+        - name: DOCKER_HOST
+          value: "unix:///var/run/docker.sock"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: kubeconfig
+          mountPath: /root/.kube
+          readOnly: true
+        - name: ansible-inventory
+          mountPath: /opt/ansible
+          readOnly: true
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
+        - name: workspace
+          mountPath: /workspace
+        - name: tmp
+          mountPath: /tmp
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      volumes:
+      - name: kubeconfig
+        secret:
+          secretName: kubeconfig
+          defaultMode: 0600
+      - name: ansible-inventory
+        configMap:
+          name: ansible-inventory
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
+          type: Socket
+      - name: workspace
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - torq-runner
+              topologyKey: kubernetes.io/hostname
+
+---
+# Service Account for Torq Runner
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: torq-runner
+  namespace: torq-automation
+  labels:
+    app: torq-runner
+    component: automation
+
+---
+# ClusterRole for Torq Runner
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: torq-runner
+  labels:
+    app: torq-runner
+    component: automation
+rules:
+# Kubernetes API access
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "secrets", "persistentvolumes", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["extensions", "networking.k8s.io"]
+  resources: ["ingresses", "networkpolicies"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Custom resources for Baker Street Labs
+- apiGroups: ["bakerstreet.labs"]
+  resources: ["*"]
+  verbs: ["*"]
+# Events for monitoring
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+# ClusterRoleBinding for Torq Runner
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: torq-runner
+  labels:
+    app: torq-runner
+    component: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: torq-runner
+subjects:
+- kind: ServiceAccount
+  name: torq-runner
+  namespace: torq-automation
+
+---
+# Namespace for Torq Automation
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: torq-automation
+  labels:
+    name: torq-automation
+    component: automation
+    managed-by: torq
+
+---
+# ConfigMap for Ansible Inventory
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ansible-inventory
+  namespace: torq-automation
+  labels:
+    app: torq-runner
+    component: automation
+data:
+  inventory.yaml: |
+    all:
+      children:
+        k3s_cluster:
+          hosts:
+            baker-street-services-01:
+              ansible_host: 192.168.0.28
+              ansible_user: root
+            baker-street-services-02:
+              ansible_host: 192.168.0.29
+              ansible_user: root
+            baker-street-services-03:
+              ansible_host: 192.168.0.30
+              ansible_user: root
+          vars:
+            ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+            ansible_python_interpreter: /usr/bin/python3
+        
+        baker_street_services:
+          children:
+            k3s_cluster
+          vars:
+            cluster_name: baker-street-services
+            cluster_type: k3s
+            domain: bakerstreet.local

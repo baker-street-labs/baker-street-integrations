@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  route-injection-service:
+    build: .
+    container_name: baker-street-route-injection
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PANOS_FIREWALL_IP=192.168.255.254
+      - PANOS_USERNAME=admin
+      - PANOS_PASSWORD=Paloalto1!
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+    networks:
+      - route-injector-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    container_name: baker-street-route-injection-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"  # Use different port to avoid conflict
+    volumes:
+      - redis_data:/data
+    networks:
+      - route-injector-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis_data:
+
+networks:
+  route-injector-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16

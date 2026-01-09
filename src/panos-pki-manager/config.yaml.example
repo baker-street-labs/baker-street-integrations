@@ -1,0 +1,143 @@
+# PAN-OS PKI Manager Configuration
+# Baker Street Labs - Firewall Certificate Management
+
+# Active Directory Certificate Authority Configuration
+certificate_authority:
+  fqdn: "bakerstreeta.ad.bakerstreetlabs.io"
+  ip_address: "192.168.0.65"
+  domain: "ad.bakerstreetlabs.io"
+  ca_name: "Baker Street Labs Root CA"
+  
+  # WinRM Configuration
+  winrm:
+    port: 5985
+    transport: "kerberos"  # Use kerberos for domain authentication
+    # Credentials from environment variables:
+    # WINRM_USER (e.g., richard@BAKERSTREETLABS or BAKERSTREETLABS\richard)
+    # WINRM_PASS
+
+# Intermediate CA Configuration
+intermediate_ca:
+  create_if_missing: true
+  template_name: "NGFWIntermediate"
+  display_name: "Baker Street Labs NGFW Intermediate CA"
+  
+  subject:
+    common_name: "Baker Street Labs NGFW Intermediate CA"
+    organization: "Baker Street Labs"
+    organizational_unit: "NGFW"
+    country: "US"
+    
+  key_config:
+    algorithm: "RSA"
+    key_size: 4096
+    hash_algorithm: "SHA256"
+    
+  validity:
+    years: 5
+    renewal_weeks: 26
+    
+  extended_key_usage:
+    - "1.3.6.1.5.5.7.3.1"  # Server Authentication
+    - "1.3.6.1.5.5.7.3.2"  # Client Authentication
+
+# Palo Alto Firewalls Configuration
+firewalls:
+  - name: "hub"
+    hostname: "hub-fw.ad.bakerstreetlabs.io"
+    ip_address: "192.168.0.7"
+    role: "hub"
+    as_number: 65530
+    # API credentials from environment variables:
+    # PAN_HUB_USERNAME (default: admin)
+    # PAN_HUB_PASSWORD or PAN_HUB_API_KEY
+    
+    certificates:
+      - name: "management-interface"
+        common_name: "hub-fw.ad.bakerstreetlabs.io"
+        sans:
+          - "hub-fw.ad.bakerstreetlabs.io"
+          - "192.168.0.7"
+          - "hub-firewall"
+        template: "BSLWebServer"  # Or NGFWServer if created
+        key_size: 2048
+        validity_years: 1
+        
+      - name: "ssl-decryption"
+        common_name: "hub-fw-decrypt.ad.bakerstreetlabs.io"
+        sans:
+          - "hub-fw-decrypt.ad.bakerstreetlabs.io"
+        template: "NGFWDecryption"  # Optional: Create separate template
+        key_size: 2048
+        validity_years: 2
+        
+  - name: "spoke"
+    hostname: "spoke-fw.ad.bakerstreetlabs.io"
+    ip_address: "192.168.255.200"
+    role: "spoke"
+    as_number: 65530
+    # API credentials from environment variables:
+    # PAN_SPOKE_USERNAME
+    # PAN_SPOKE_PASSWORD or PAN_SPOKE_API_KEY
+    
+    certificates:
+      - name: "management-interface"
+        common_name: "spoke-fw.ad.bakerstreetlabs.io"
+        sans:
+          - "spoke-fw.ad.bakerstreetlabs.io"
+          - "192.168.255.200"
+          - "spoke-firewall"
+        template: "BSLWebServer"
+        key_size: 2048
+        validity_years: 1
+
+# Certificate Template for NGFW (if creating new template)
+ngfw_template:
+  create_if_missing: true
+  name: "NGFWServer"
+  display_name: "Baker Street Labs NGFW Server"
+  base_template: "WebServer"
+  
+  validity_years: 1
+  renewal_weeks: 6
+  key_size: 2048
+  
+  key_usage:
+    - "Digital Signature"
+    - "Key Encipherment"
+    
+  extended_key_usage:
+    - "1.3.6.1.5.5.7.3.1"  # Server Authentication
+    
+  subject_name_type: "supply_in_request"
+  allow_san: true
+  allow_private_key_export: true
+  auto_enrollment: false
+  
+  permissions:
+    - group: "Domain Admins"
+      rights: ["Read", "Enroll", "Full Control"]
+    - group: "Domain Computers"
+      rights: ["Read", "Enroll"]
+
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "panos_pki_manager.log"
+  console: true
+  
+# Operational Settings
+settings:
+  dry_run: false  # Set to true for testing without making changes
+  check_existing: true  # Check if certificates already exist before creating
+  backup_before_import: true  # Backup firewall config before importing certs
+  commit_after_import: true  # Automatically commit changes to firewall
+  verify_chain: true  # Verify certificate chain before importing
+  
+# Output Configuration
+output:
+  cert_directory: "./certificates"
+  csr_directory: "./csrs"
+  backup_directory: "./backups"
+  create_directories: true
+

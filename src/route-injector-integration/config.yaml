@@ -1,0 +1,139 @@
+# Baker Street Labs Route Injection Configuration
+# Master Router and DNS Integration Settings
+
+# Master Router Configuration
+master_router:
+  # Primary master router for cyber range
+  primary:
+    name: "baker-street-master-router"
+    ip_address: "192.168.255.254"
+    username: "admin"
+    password: "Paloalto1!"
+    api_port: 443
+    timeout: 30
+    virtual_router: "default"
+    interface: "ethernet1/1"
+    next_hop: "172.21.55.20"
+    metric: 10
+  
+  # Backup master router (if available)
+  backup:
+    name: "baker-street-backup-router"
+    ip_address: "192.168.255.253"
+    username: "admin"
+    password: "Paloalto1!"
+    api_port: 443
+    timeout: 30
+    virtual_router: "default"
+    interface: "ethernet1/1"
+    next_hop: "172.21.55.20"
+    metric: 10
+
+# DNS API Configuration
+dns_api:
+  # Mothership DNS Tool
+  mothership:
+    base_url: "http://10.43.20.75:9090"
+    username: "admin"
+    password: "admin"
+    timeout: 30
+    retry_attempts: 3
+    retry_delay: 5
+  
+  # Kong Gateway (if using Kong for DNS)
+  kong:
+    base_url: "http://localhost:8000/api/v1/dns"
+    api_key: "baker_street_api_key_2025"
+    timeout: 30
+
+# Route Injection Configuration
+route_injection:
+  # Cyber range networks that should trigger route injection
+  cyber_range_networks:
+    - "10.0.0.0/8"
+    - "172.20.0.0/16"
+    - "172.21.0.0/16"
+    - "192.168.0.0/16"
+  
+  # Route naming convention
+  route_naming:
+    prefix: "dns"
+    separator: "_"
+    include_zone: true
+    include_timestamp: false
+  
+  # Route management
+  route_management:
+    auto_commit: true
+    commit_timeout: 60
+    cleanup_old_routes: true
+    max_route_age_days: 30
+  
+  # Webhook configuration
+  webhooks:
+    enabled: true
+    timeout: 30
+    retry_attempts: 3
+    retry_delay: 5
+
+# Redis Configuration
+redis:
+  host: "localhost"
+  port: 6380
+  db: 0
+  password: ""
+  timeout: 30
+  key_prefix: "route_injection:"
+  ttl_seconds: 86400
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "/app/logs/route_injection.log"
+  max_size_mb: 100
+  backup_count: 5
+
+# Security Configuration
+security:
+  # API key for webhook authentication
+  webhook_api_key: "baker_street_webhook_key_2025"
+  
+  # SSL/TLS settings
+  verify_ssl: false  # Set to true in production
+  ssl_cert_path: ""
+  ssl_key_path: ""
+  
+  # Rate limiting
+  rate_limit:
+    enabled: true
+    requests_per_minute: 100
+    burst_size: 20
+
+# Monitoring Configuration
+monitoring:
+  # Health check settings
+  health_check:
+    enabled: true
+    interval_seconds: 30
+    timeout_seconds: 10
+  
+  # Metrics collection
+  metrics:
+    enabled: true
+    prometheus_port: 9090
+    grafana_port: 3000
+  
+  # Alerting
+  alerts:
+    enabled: true
+    webhook_url: ""
+    email_recipients: []
+
+# Development Settings
+development:
+  debug: true
+  mock_panos: false
+  test_mode: false
+  log_requests: true
+  log_responses: true
